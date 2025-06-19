@@ -1,0 +1,371 @@
+#####################################################################################
+# Importing Data from Google Drive
+!pip install -U -q PyDrive
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from google.colab import auth
+from oauth2client.client import GoogleCredentials
+auth.authenticate_user()
+gauth = GoogleAuth()
+gauth.credentials = GoogleCredentials.get_application_default()
+drive = GoogleDrive(gauth)
+fid = drive.ListFile({'q':"title='sugarcane.zip'"}).GetList()[0]['id']
+f = drive.CreateFile({'id': fid})
+f.GetContentFile('sugarcane.zip')
+f.keys()
+!unzip 'sugarcane.zip'
+
+#####################################################################################
+# Importing Different Libraries
+!pip install -U -q PyDrive
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from google.colab import auth
+from oauth2client.client import GoogleCredentials
+auth.authenticate_user()
+gauth = GoogleAuth()
+gauth.credentials = GoogleCredentials.get_application_default()
+drive = GoogleDrive(gauth)
+fid = drive.ListFile({'q':"title='sugarcane.zip'"}).GetList()[0]['id']
+f = drive.CreateFile({'id': fid})
+f.GetContentFile('sugarcane.zip')
+f.keys()
+!unzip 'sugarcane.zip'
+
+#####################################################################################
+# Pre-processing and Training and Validation split
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+image_size = 128
+batch_size = 64
+
+df_path = '/content/sugarcane_refined'
+
+dg = ImageDataGenerator(
+    rescale=1./255, validation_split=0.25,
+    rotation_range=20,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    vertical_flip=False
+)
+
+training_df = dg.flow_from_directory(
+    df_path,
+    target_size=(image_size, image_size),
+    batch_size=batch_size,
+    class_mode='categorical',
+    subset='training',
+    shuffle=True,
+    seed=42
+)
+
+validation_df = dg.flow_from_directory(
+    df_path,
+    target_size=(image_size, image_size),
+    batch_size=batch_size,
+    class_mode='categorical',
+    subset='validation',
+    shuffle=False,
+    seed=42
+)
+
+print("Class Indices:", training_df.class_indices)
+print("Validation Classes:", validation_df.classes)
+
+#####################################################################################
+# Custom CNN Model 
+image_size = 128
+input_shape = (image_size,image_size,3)
+
+model = Sequential()
+
+model.add(Conv2D(filters=34,kernel_size=(3,3),input_shape = input_shape, activation= 'relu'))
+model.add(MaxPooling2D(pool_size=(2,2)))
+
+model.add(Conv2D(filters=64,kernel_size=(3,3),input_shape=input_shape, activation= 'relu'))
+model.add(MaxPooling2D(pool_size=(2,2)))
+
+model.add(Conv2D(filters=128,kernel_size=(3,3),input_shape=input_shape, activation= 'relu'))
+model.add(MaxPooling2D(pool_size=(2,2)))
+
+model.add(Flatten())
+
+model.add(Dense(128,activation='relu'))
+
+model.add(Dropout(0.5))
+
+model.add(Dense(5,activation='softmax'))
+
+model.summary()
+
+from tensorflow.keras.utils import plot_model
+
+plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True, dpi=50)
+
+model.compile(
+    loss='categorical_crossentropy',
+    optimizer=optimizers.RMSprop(learning_rate=2e-4),
+    metrics=['acc']
+)
+
+history = model.fit(training_df,
+          epochs=30,
+          validation_data=validation_df)
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Loss Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['acc'], label='Train Accuracy')
+plt.plot(history.history['val_acc'], label='Validation Accuracy')
+plt.title('Accuracy Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+scores = model.evaluate(training_df, verbose=0)
+print("Train accuracy: %.2f%%" % (scores[1]*100))
+
+scores = model.evaluate(validation_df, verbose=0)
+print("Test accuracy: %.2f%%" % (scores[1]*100))
+
+#####################################################################################
+# Confusion Matrix
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+class_names = list(validation_dataset.class_indices.keys())
+
+validation_dataset.reset()
+
+predictions = model.predict(validation_dataset, verbose=1)
+
+true_labels = validation_dataset.classes  # Much faster! No need to loop
+predicted_labels = np.argmax(predictions, axis=1)
+
+cm = confusion_matrix(true_labels, predicted_labels)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, cmap='Orange', fmt='d', xticklabels=class_names, yticklabels=class_names)
+
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.show()
+
+#####################################################################################
+# Model Evaluation
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+
+accuracy = accuracy_score(true_labels, predicted_labels)
+
+precision = precision_score(true_labels, predicted_labels, average='weighted')
+
+recall = recall_score(true_labels, predicted_labels, average='weighted')
+
+f1 = f1_score(true_labels, predicted_labels, average='weighted')
+
+if len(np.unique(true_labels)) > 2:
+    true_labels_one_hot = np.eye(len(np.unique(true_labels)))[true_labels]
+    roc_auc = roc_auc_score(true_labels_one_hot, predictions, multi_class='ovr')
+else:
+    roc_auc = roc_auc_score(true_labels, predictions[:,1])
+
+print(f"Accuracy Score: {accuracy:.3f}")
+print(f"Precision: {precision:.3f}")
+print(f"Recall: {recall:.3f}")
+print(f"F1 Score: {f1:.3f}")
+print(f"ROC-AUC Score: {roc_auc:.3f}")
+
+#####################################################################################
+# EfficientNetB0 Pre-trained CNN model
+base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(image_size, image_size, 3))
+base_model.trainable = False 
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Dense(256, activation='relu')(x)
+x = Dropout(0.5)(x)
+predictions = Dense(num_classes, activation='softmax')(x)
+
+model = Model(inputs=base_model.input, outputs=predictions)
+model.compile(optimizer=Adam(learning_rate=1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
+
+
+history = model.fit(
+    train_generator,
+    epochs=epochs,
+    validation_data=valid_generator,
+    verbose=2
+)
+
+
+base_model.trainable = True
+for layer in base_model.layers[:-20]:  
+    layer.trainable = False
+
+model.compile(optimizer=Adam(1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
+
+fine_tune_epochs = 10
+
+history_fine = model.fit(
+    train_generator,
+    epochs=fine_tune_epochs,
+    validation_data=valid_generator,
+    verbose=2
+)
+
+
+valid_generator.reset()
+y_true = valid_generator.classes
+y_pred_prob = model.predict(valid_generator)
+y_pred = np.argmax(y_pred_prob, axis=1)
+
+y_true_bin = label_binarize(y_true, classes=list(range(num_classes)))
+
+acc = accuracy_score(y_true, y_pred)
+prec = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+rec = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+roc_auc = roc_auc_score(y_true_bin, y_pred_prob, average='weighted', multi_class='ovr')
+
+print(f"Train Accuracy: {history.history['accuracy'][-1] * 100:.2f}%")
+print(f"Validation Accuracy: {history_fine.history['val_accuracy'][-1] * 100:.2f}%")
+print(f"Accuracy Score: {acc:.4f}")
+print(f"Precision: {prec:.4f}")
+print(f"Recall: {rec:.4f}")
+print(f"F1 Score: {f1:.4f}")
+print(f"ROC-AUC Score: {roc_auc:.4f}")
+
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'] + history_fine.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'] + history_fine.history['val_loss'], label='Validation Loss')
+plt.title('Loss Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'] + history_fine.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'] + history_fine.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Accuracy Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+Y_true = valid_generator.classes  
+class_names = list(valid_generator.class_indices.keys()) 
+
+Y_pred_probs = model.predict(valid_generator)
+Y_pred = np.argmax(Y_pred_probs, axis=1)
+
+cm = confusion_matrix(Y_true, Y_pred)
+
+plt.figure(figsize=(6, 4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='magma', 
+            xticklabels=class_names, yticklabels=class_names)
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.show()
+
+#####################################################################################
+# MobileNetV2 Pre-trained Model
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+
+base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+base_model.trainable = False 
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Dense(128, activation='relu')(x)
+x = Dropout(0.5)(x)
+outputs = Dense(5, activation='softmax')(x) 
+
+model = Model(inputs=base_model.input, outputs=outputs)
+
+model.compile(optimizer=Adam(learning_rate=1e-4),
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+#####################################################################################
+# ResNet50 Pre-trained Model
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+
+base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+base_model.trainable = False  
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Dropout(0.4)(x)
+x = Dense(128, activation='relu')(x)
+x = Dropout(0.3)(x)
+predictions = Dense(training_df.num_classes, activation='softmax')(x)
+
+model = Model(inputs=base_model.input, outputs=predictions)
+
+model.compile(optimizer=Adam(learning_rate=0.0001),
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+history = model.fit(
+    training_df,
+    validation_data=validation_df,
+    epochs=20,
+    callbacks=[early_stop]
+)
+
+#####################################################################################
+# Visualy Comparision of Evaluation Matrix of all custome and pre-trained model used
+import matplotlib.pyplot as plt
+import numpy as np
+metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score', 'ROC-AUC']
+custom_cnn_scores = [0.505, 0.555, 0.505, 0.485, 0.806]
+mobilenetv2_scores = [0.643, 0.645, 0.643, 0.632, 0.906]
+efficientnetb0_scores = [0.7191, 0.7145, 0.7191, 0.7052, 0.9346]
+x = np.arange(len(metrics))
+width = 0.25  
+plt.figure(figsize=(8, 5))
+plt.bar(x - width, custom_cnn_scores, width, label='Custom CNN', color='cyan')
+plt.bar(x, mobilenetv2_scores, width, label='MobileNetV2', color='magenta')
+plt.bar(x + width, efficientnetb0_scores, width, label='EfficientNetB0', color='orange')
+plt.ylabel('Score')
+plt.title('Model Evaluation Metrics Comparison')
+plt.xticks(x, metrics)
+plt.ylim(0, 1.1)
+plt.legend()
+plt.grid(axis='y', linestyle='--', alpha=0.6)
+for i in range(len(metrics)):
+    plt.text(x[i] - width, custom_cnn_scores[i] + 0.02, f'{custom_cnn_scores[i]:.2f}', ha='center')
+    plt.text(x[i], mobilenetv2_scores[i] + 0.02, f'{mobilenetv2_scores[i]:.2f}', ha='center')
+    plt.text(x[i] + width, efficientnetb0_scores[i] + 0.02, f'{efficientnetb0_scores[i]:.2f}', ha='center')
+plt.tight_layout()
+plt.show()
