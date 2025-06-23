@@ -1,0 +1,463 @@
+# COnnect to Google drive to import dataset
+!pip install -U -q PyDrive
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from google.colab import auth
+from oauth2client.client import GoogleCredentials
+auth.authenticate_user()
+gauth = GoogleAuth()
+gauth.credentials = GoogleCredentials.get_application_default()
+drive = GoogleDrive(gauth)
+fid = drive.ListFile({'q':"title='ACDC.zip'"}).GetList()[0]['id']
+f = drive.CreateFile({'id': fid})
+f.GetContentFile('ACDC.zip')
+f.keys()
+!unzip 'ACDC.zip'
+
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import os
+import tensorflow as tf
+from tensorflow.keras.layers import BatchNormalization,Conv2D,MaxPooling2D
+from tensorflow.keras.layers import Dense,Dropout,Flatten
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import optimizers
+print(tf.__version__)
+
+# Pre-processing
+import h5py
+
+file_path = '/content/ACDC_preprocessed/ACDC_training_volumes/patient001_frame01.h5'
+
+with h5py.File(file_path, 'r') as f:
+    print("Keys in the file:", list(f.keys()))
+import os
+import h5py
+import numpy as np
+import cv2
+from tqdm import tqdm
+
+IMG_SIZE = 128
+
+train_dir = '/content/ACDC_preprocessed/ACDC_training_slices'
+test_dir  = '/content/ACDC_preprocessed/ACDC_testing_volumes'
+
+train_files = sorted([os.path.join(train_dir, f) for f in os.listdir(train_dir) if f.endswith('.h5')])
+test_files  = sorted([os.path.join(test_dir, f) for f in os.listdir(test_dir) if f.endswith('.h5')])
+
+train_images = []
+train_masks = []
+test_images = []
+test_masks = []
+
+for file in tqdm(train_files):
+    f = h5py.File(file, 'r')
+    img = np.array(f['image'])[0]
+    mask = np.array(f['label'])[0]
+    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE)) / 255.0
+    mask = cv2.resize(mask, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_NEAREST)
+    train_images.append(img)
+    train_masks.append(mask)
+
+for file in tqdm(test_files):
+    f = h5py.File(file, 'r')
+    img = np.array(f['image'])[0]
+    mask = np.array(f['label'])[0]
+    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE)) / 255.0
+    mask = cv2.resize(mask, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_NEARES Custom CNNT)
+    test_images.append(img)
+    test_masks.append(mask)
+
+train_images = np.expand_dims(np.array(train_images), -1)
+train_masks = np.expand_dims(np.array(train_masks), -1)
+test_images = np.expand_dims(np.array(test_images), -1)
+test_masks = np.expand_dims(np.array(test_masks), -1)
+print(f"Train images shape: {train_images.shape}")
+print(f"Train masks shape: {train_masks.shape}")
+print(f"Test images shape: {test_images.shape}")
+print(f"Test masks shape: {test_masks.shape}")
+
+# Custom CNN Model
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D
+
+input_layer = Input(shape=(128, 128, 1))
+
+x = Conv2D(32, (3, 3), activation='relu', padding='same')(input_layer)
+x = MaxPooling2D((2, 2))(x)
+x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+x = MaxPooling2D((2, 2))(x)
+
+x = UpSampling2D((2, 2))(x)
+x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+x = UpSampling2D((2, 2))(x)
+x = Conv2D(32, (3, 3), activation='relu', padding='same')(x)
+
+output_layer = Conv2D(1, (1, 1), activation='sigmoid')(x)
+
+model = Model(inputs=input_layer, outputs=output_layer)
+model.summary()
+
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+history = model.fit(train_images, train_masks,
+                    validation_data=(test_images, test_masks),
+                    epochs=10, batch_size=16)
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Loss Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Accuracy Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Moddel Evaluation
+import numpy as np
+import matplotlib.pyplot as plt
+
+pred_masks = model.predict(test_images)
+pred_masks = (pred_masks > 0.5).astype(np.uint8)
+
+y_true = test_masks.reshape(test_masks.shape[0], -1)
+y_pred = pred_masks.reshape(pred_masks.shape[0], -1)
+
+intersection = np.sum(y_true * y_pred, axis=1)
+sum_true = np.sum(y_true, axis=1)
+sum_pred = np.sum(y_pred, axis=1)
+
+dice_scores = (2 * intersection + 1e-6) / (sum_true + sum_pred + 1e-6)
+iou_scores = (intersection + 1e-6) / (sum_true + sum_pred - intersection + 1e-6)
+
+mean_dice = np.mean(dice_scores)
+mean_iou = np.mean(iou_scores)
+
+print(f"Mean Dice Coefficient: {mean_dice: .4f}")
+print(f"Mean IoU Score: {mean_iou: .4f}")
+
+# Visulization
+plt.figure(figsize=(12, 9))
+for i in range(3):
+    plt.subplot(3, 3, i*3 + 1)
+    plt.title("Input Image")
+    plt.imshow(test_images[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+    plt.subplot(3, 3, i*3 + 2)
+    plt.title("Ground Truth Mask")
+    plt.imshow(test_masks[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+    plt.subplot(3, 3, i*3 + 3)
+    plt.title("Predicted Mask")
+    plt.imshow(pred_masks[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+# Custom UNet CNN Model
+from keras_unet.models import custom_unet
+
+model = custom_unet(
+    input_shape=(128,128,1),
+    use_batch_norm=True,
+    num_classes=1,
+    filters=64,
+    dropout=0.5,
+    output_activation='sigmoid'
+)
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model.summary()
+
+history = model.fit(train_images, train_masks,
+                    validation_data=(test_images, test_masks),
+                    epochs=3, batch_size=16)
+
+#Evaluation
+import numpy as np
+import matplotlib.pyplot as plt
+
+pred_masks = model.predict(test_images)
+pred_masks = (pred_masks > 0.5).astype(np.uint8)
+
+y_true = test_masks.reshape(test_masks.shape[0], -1)
+y_pred = pred_masks.reshape(pred_masks.shape[0], -1)
+
+intersection = np.sum(y_true * y_pred, axis=1)
+sum_true = np.sum(y_true, axis=1)
+sum_pred = np.sum(y_pred, axis=1)
+
+dice_scores = (2 * intersection + 1e-6) / (sum_true + sum_pred + 1e-6)
+iou_scores = (intersection + 1e-6) / (sum_true + sum_pred - intersection + 1e-6)
+
+mean_dice = np.mean(dice_scores)
+mean_iou = np.mean(iou_scores)
+
+print(f"Mean Dice Coefficient: {mean_dice: .4f}")
+print(f"Mean IoU Score: {mean_iou: .4f}")
+
+# Visulzation
+plt.figure(figsize=(10, 7))
+for i in range(3):
+    plt.subplot(3, 3, i*3 + 1)
+    plt.title("Input Image")
+    plt.imshow(test_images[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+    plt.subplot(3, 3, i*3 + 2)
+    plt.title("Ground Truth Mask")
+    plt.imshow(test_masks[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+    plt.subplot(3, 3, i*3 + 3)
+    plt.title("Predicted Mask")
+    plt.imshow(pred_masks[i].squeeze(), cmap='gray')
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+# Pre-Trained ResNet34 model in UNet Architecture
+import tensorflow as tf
+from segmentation_models import Unet
+
+model = Unet(
+    backbone_name='resnet34',
+    input_shape=(128, 128, 3),
+    encoder_weights='imagenet',
+    classes=1,
+    activation='sigmoid'
+)
+
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+dummy_input = tf.zeros((1, 128, 128, 3))
+_ = model(dummy_input)
+
+history = model.fit(
+    train_images_rgb,
+    train_masks,
+    validation_data=(test_images_rgb, test_masks),
+    epochs=10,
+    batch_size=16
+)
+# Evaluation
+import numpy as np
+import matplotlib.pyplot as plt
+
+pred_masks = model.predict(test_images_rgb)
+pred_masks = (pred_masks > 0.5).astype(np.uint8)
+
+y_true = test_masks.reshape(test_masks.shape[0], -1)
+y_pred = pred_masks.reshape(pred_masks.shape[0], -1)
+
+intersection = np.sum(y_true * y_pred, axis=1)
+sum_true = np.sum(y_true, axis=1)
+sum_pred = np.sum(y_pred, axis=1)
+
+dice_scores = (2 * intersection + 1e-6) / (sum_true + sum_pred + 1e-6)
+iou_scores = (intersection + 1e-6) / (sum_true + sum_pred - intersection + 1e-6)
+
+mean_dice = np.mean(dice_scores)
+mean_iou = np.mean(iou_scores)
+
+print(f"Mean Dice Coefficient: {mean_dice: .4f}")
+print(f"Mean IoU Score: {mean_iou: .4f}")
+
+# Pre-processing 3D Volume training data
+import os
+import h5py
+import numpy as np
+from scipy.ndimage import zoom
+
+train_dir = '/content/ACDC_preprocessed/ACDC_training_volumes'
+test_dir = '/content/ACDC_preprocessed/ACDC_testing_volumes'
+
+target_shape = (8, 256, 256, 1)
+
+def load_and_preprocess_h5(folder_path):
+    images = []
+    labels = []
+
+    for file in sorted(os.listdir(folder_path)):
+        if file.endswith('.h5'):
+            with h5py.File(os.path.join(folder_path, file), 'r') as f:
+                img = f['image'][()]     
+                lbl = f['label'][()]     
+
+                img = img.astype(np.float32)
+                img = (img - img.min()) / (img.max() - img.min() + 1e-6)
+
+                img = np.expand_dims(img, axis=-1)
+                lbl = np.expand_dims(lbl, axis=-1)
+
+                images.append(img)
+                labels.append(lbl)
+
+    return images, labels
+
+def resize_volume(volume, target_shape=target_shape):
+    current_shape = volume.shape
+    zoom_factors = [t / s for t, s in zip(target_shape, current_shape)]
+    resized = zoom(volume, zoom=zoom_factors, order=1)  
+    return resized
+
+def resize_label(label, target_shape=target_shape):
+    current_shape = label.shape
+    zoom_factors = [t / s for t, s in zip(target_shape, current_shape)]
+    resized = zoom(label, zoom=zoom_factors, order=0)  
+    return resized
+
+train_images, train_labels = load_and_preprocess_h5(train_dir)
+test_images, test_labels = load_and_preprocess_h5(test_dir)
+
+train_images_resized = [resize_volume(vol) for vol in train_images]
+train_labels_resized = [resize_label(lbl) for lbl in train_labels]
+
+test_images_resized = [resize_volume(vol) for vol in test_images]
+test_labels_resized = [resize_label(lbl) for lbl in test_labels]
+
+train_images_np = np.stack(train_images_resized, axis=0)
+train_labels_np = np.stack(train_labels_resized, axis=0)
+test_images_np = np.stack(test_images_resized, axis=0)
+test_labels_np = np.stack(test_labels_resized, axis=0)
+
+print("Train images shape:", train_images_np.shape)
+print("Train labels shape:", train_labels_np.shape)
+print("Test images shape:", test_images_np.shape)
+print("Test labels shape:", test_labels_np.shape)
+
+# 3D Custom CNN UNet Model
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv3D, MaxPooling3D, UpSampling3D, concatenate, BatchNormalization, Activation
+
+def simple_3d_unet(input_shape=(8, 256, 256, 1)):
+    inputs = Input(shape=input_shape)
+
+    c1 = Conv3D(16, 3, padding='same')(inputs)
+    c1 = BatchNormalization()(c1)
+    c1 = Activation('relu')(c1)
+    p1 = MaxPooling3D(pool_size=(1, 2, 2))(c1) 
+
+    c2 = Conv3D(32, 3, padding='same')(p1)
+    c2 = BatchNormalization()(c2)
+    c2 = Activation('relu')(c2)
+    p2 = MaxPooling3D(pool_size=(1, 2, 2))(c2)
+
+    b = Conv3D(64, 3, padding='same')(p2)
+    b = BatchNormalization()(b)
+    b = Activation('relu')(b)
+
+    u1 = UpSampling3D(size=(1, 2, 2))(b)
+    u1 = Conv3D(32, 3, padding='same')(u1)
+    u1 = BatchNormalization()(u1)
+    u1 = Activation('relu')(u1)
+
+    u2 = UpSampling3D(size=(1, 2, 2))(u1)
+    u2 = Conv3D(16, 3, padding='same')(u2)
+    u2 = BatchNormalization()(u2)
+    u2 = Activation('relu')(u2)
+
+    outputs = Conv3D(1, 1, activation='sigmoid')(u2)
+
+    model = Model(inputs, outputs)
+    return model
+
+model = simple_3d_unet()
+model.summary()
+
+model.compile(optimizer='adam',
+              loss='binary_crossentropy',
+              metrics=['accuracy'])
+
+history = model.fit(
+    train_images_np, train_labels_np,
+    validation_data=(test_images_np, test_labels_np),
+    epochs=5,
+    batch_size=2
+)
+
+# Evaluation
+import numpy as np
+from tensorflow.keras.metrics import Mean
+
+def dice_coefficient(y_true, y_pred, smooth=1e-6):
+    y_true_f = y_true.flatten()
+    y_pred_f = y_pred.flatten()
+    intersection = np.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (np.sum(y_true_f) + np.sum(y_pred_f) + smooth)
+
+def iou_score(y_true, y_pred, smooth=1e-6):
+    y_true_f = y_true.flatten()
+    y_pred_f = y_pred.flatten()
+    intersection = np.sum(y_true_f * y_pred_f)
+    union = np.sum(y_true_f) + np.sum(y_pred_f) - intersection
+    return (intersection + smooth) / (union + smooth)
+
+y_pred = model.predict(test_images_np, batch_size=2)
+y_pred_bin = (y_pred > 0.5).astype(np.uint8) 
+dice_scores = []
+iou_scores = []
+
+for i in range(len(test_labels_np)):
+    dice = dice_coefficient(test_labels_np[i], y_pred_bin[i])
+    iou = iou_score(test_labels_np[i], y_pred_bin[i])
+    dice_scores.append(dice)
+    iou_scores.append(iou)
+
+print(f"Mean Dice Coefficient on Test Set: {np.mean(dice_scores):.4f}")
+print(f"Mean IoU Score on Test Set: {np.mean(iou_scores):.4f}")
+
+# Visulization
+import matplotlib.pyplot as plt
+
+def plot_prediction_vs_ground_truth(image, ground_truth, prediction, num_slices=4):
+
+    fig, axs = plt.subplots(num_slices, 3, figsize=(5, num_slices * 2))
+
+    slice_indices = np.linspace(0, image.shape[0] - 1, num_slices, dtype=int)
+
+    for i, idx in enumerate(slice_indices):
+        axs[i, 0].imshow(image[idx, :, :, 0], cmap='gray')
+        axs[i, 0].set_title(f"Image - Slice {idx}")
+        axs[i, 1].imshow(ground_truth[idx, :, :, 0], cmap='gray')
+        axs[i, 1].set_title("Ground Truth")
+        axs[i, 2].imshow(prediction[idx, :, :, 0], cmap='gray')
+        axs[i, 2].set_title("Prediction")
+
+    for ax in axs.flat:
+        ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+sample_idx = 0
+img = test_images_np[sample_idx]
+gt = test_labels_np[sample_idx]
+pred = (y_pred[sample_idx] > 0.5).astype(np.uint8)
+
+plot_prediction_vs_ground_truth(img, gt, pred)
+
